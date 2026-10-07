@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>fp-probe</title></head>
+<body>
+<p>fingerprint probe running — result is written to <code>document.title</code> as <code>FPR|{json}</code></p>
+<script>
+(async () => {
+  const R = {};
+  R.ua = navigator.userAgent;
+  R.platform = navigator.platform;
+  R.screen = screen.width + "x" + screen.height;
+  R.avail = screen.availWidth + "x" + screen.availHeight;
+  R.dpr = window.devicePixelRatio;
+  R.depth = screen.colorDepth;
+  R.cores = navigator.hardwareConcurrency;
+  R.mem = navigator.deviceMemory ?? "na";
+  R.lang = navigator.languages.join(",");
+  R.tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+  // canvas fingerprint (FNV-1a of the data URL + pixel sample)
+  try {
+    const c = document.createElement("canvas"); c.width = 300; c.height = 80;
+    const x = c.getContext("2d");
+    x.textBaseline = "top"; x.font = "16px 'Arial'"; x.fillStyle = "#f60";
+    x.fillRect(0, 0, 120, 30); x.fillStyle = "#069";
+    x.fillText("fingerprint-probe \u{1F60A}, <canvas>", 2, 2);
+    x.fillStyle = "rgba(102,204,0,0.7)"; x.fillText("fp-lab", 4, 22);
+    const d = c.toDataURL();
+    let h = 0x811c9dc5;
+    for (let i = 0; i < d.length; i++) { h ^= d.charCodeAt(i); h = (h * 0x01000193) >>> 0; }
+    R.canvas = h.toString(16);
+    const px = x.getImageData(50, 10, 1, 1).data;
+    R.px = px[0] + "," + px[1] + "," + px[2] + "," + px[3];
+  } catch (e) { R.canvas = "err"; }
+
+  // WebGL vendor/renderer + render hash
+  try {
+    const gc = document.createElement("canvas");
+    const gl = gc.getContext("webgl");
+    const ext = gl.getExtension("WEBGL_debug_renderer_info");
+    R.glVendor = gl.getParameter(ext.UNMASKED_VENDOR_WEBGL);
+    R.glRenderer = gl.getParameter(ext.UNMASKED_RENDERER_WEBGL);
+    R.glVersion = gl.getParameter(gl.VERSION);
+    gc.width = 100; gc.height = 100;
+    const g2 = gc.getContext("webgl");
+    g2.clearColor(0.3, 0.6, 0.9, 1); g2.clear(g2.COLOR_BUFFER_BIT);
+    const buf = new Uint8Array(100 * 100 * 4);
+    g2.readPixels(0, 0, 100, 100, g2.RGBA, g2.UNSIGNED_BYTE, buf);
+    let h2 = 0x811c9dc5;
+    for (let i = 0; i < buf.length; i += 7) { h2 ^= buf[i]; h2 = (h2 * 0x01000193) >>> 0; }
+    R.glHash = h2.toString(16);
+  } catch (e) { R.glVendor = "err"; }
+
+  // audio fingerprint
+  try {
+    const actx = new OfflineAudioContext(1, 5000, 44100);
+    const osc = actx.createOscillator(); osc.type = "triangle"; osc.frequency.value = 10000;
+    const comp = actx.createDynamicsCompressor();
+    comp.threshold.value = -50; comp.knee.value = 40; comp.ratio.value = 12;
+    comp.attack.value = 0; comp.release.value = 0.25;
+    osc.connect(comp); comp.connect(actx.destination); osc.start(0);
+    const rendered = await actx.startRendering();
+    const ch = rendered.getChannelData(0);
+    let s = 0; for (let i = 4500; i < 5000; i++) s += Math.abs(ch[i]);
+    R.audio = s.toFixed(8);
+  } catch (e) { R.audio = "err"; }
+
+  // font availability probe
+  const fonts = ["Arial","Verdana","Tahoma","Trebuchet MS","Times New Roman","Georgia",
+    "Courier New","Segoe UI","Calibri","Cambria","Consolas","Candara","Franklin Gothic",
+    "Garamond","Impact","Lucida Console","Microsoft Sans Serif","Palatino Linotype",
+    "SimSun","SimHei","Microsoft YaHei","KaiTi","FangSong","Meiryo","Malgun Gothic","Yu Gothic"];
+  try {
+    const span = document.createElement("span");
+    span.style.cssText = "position:absolute;visibility:hidden;font-size:48px";
+    span.textContent = "mmmmmmmmmmlli";
+    document.body.appendChild(span);
+    const defW = {};
+    for (const b of ["monospace", "sans-serif", "serif"]) { span.style.fontFamily = b; defW[b] = span.offsetWidth; }
+    const found = [];
+    for (const f of fonts) {
+      for (const b of ["monospace", "sans-serif", "serif"]) {
+        span.style.fontFamily = "'" + f + "'," + b;
+        if (span.offsetWidth !== defW[b]) { found.push(f); break; }
+      }
+    }
+    span.remove();
+    R.fonts = found.length + "/" + fonts.length;
+  } catch (e) { R.fonts = "err"; }
+
+  document.title = "FPR|" + JSON.stringify(R);
+})();
+</script>
+</body>
+</html>
